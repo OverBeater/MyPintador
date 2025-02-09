@@ -14,30 +14,18 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class SimplePaint extends View {
-    private final List<Paint> paintList;
-    private final List<Path> pathList;
+    private static final float DEFAULT_STROKE_WIDTH = 20f;
+
+    private final List<DrawAction> drawActions = new ArrayList<>();
     private Paint currentPaint;
     private Path currentPath;
-    private final ColorDrawable currentColor;
     private StyleType style = StyleType.desenhoLivre;
 
+    private float startX, startY, endX, endY;
     private boolean isPencilMode = false;
-
-    float auxiliarLxInicial = 0,
-            auxiliarLxFinal = 0,
-            auxiliarLyInicial = 0,
-            auxiliarLyFinal = 0;
-
-    public void setPencilMode(boolean pencilMode) {
-        isPencilMode = pencilMode;
-    }
 
     public SimplePaint(Context context, @Nullable AttributeSet attrs) {
         super(context, attrs);
-        paintList = new ArrayList<>();
-        pathList = new ArrayList<>();
-
-        currentColor = new ColorDrawable(Color.BLACK);
         initialize();
     }
 
@@ -46,114 +34,90 @@ public class SimplePaint extends View {
         currentPath = new Path();
 
         currentPaint.setStyle(Paint.Style.STROKE);
-        currentPaint.setStrokeWidth(20);
-        currentPaint.setColor(currentColor.getColor());
+        currentPaint.setStrokeWidth(DEFAULT_STROKE_WIDTH);
+        currentPaint.setColor(Color.BLACK);
     }
 
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-        for (int i = 0; i < paintList.size(); i++) {
-            canvas.drawPath(pathList.get(i), paintList.get(i));
+        for (DrawAction action : drawActions) {
+            canvas.drawPath(action.path, action.paint);
         }
-
         canvas.drawPath(currentPath, currentPaint);
     }
 
     @SuppressLint("ClickableViewAccessibility")
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        float ly, lx;
-
-        lx = event.getX();
-        ly = event.getY();
+        float x = event.getX();
+        float y = event.getY();
 
         switch (event.getAction()) {
-
             case MotionEvent.ACTION_DOWN:
-
-                if (style != StyleType.desenhoLivre) {
-                    isPencilMode = false;
-                }else {
-                    isPencilMode = true;
-                }
-
-                currentPath.moveTo(lx, ly);
-                auxiliarLxInicial = lx;
-                auxiliarLyInicial = ly;
-                auxiliarLxFinal = lx; // Define o ponto final inicialmente igual ao ponto inicial
-                auxiliarLyFinal = ly;
-                break;
-
-            case MotionEvent.ACTION_UP:
-
-                if (style == StyleType.linha) {
-                    currentPath.lineTo(lx, ly); // Desenha linha reta
-                } else if (style == StyleType.circulo) {
-                    double distanciaFinal = Math.sqrt(Math.pow(auxiliarLxFinal - auxiliarLxInicial, 2) + Math.pow(auxiliarLyFinal - auxiliarLyInicial, 2));
-                    float raio = (float) (distanciaFinal / 2);
-                    float x = (auxiliarLxInicial + auxiliarLxFinal) / 2;
-                    float y = (auxiliarLyInicial + auxiliarLyFinal) / 2;
-                    currentPath.reset();
-                    currentPath.addCircle(x, y, raio, Path.Direction.CW);
-                } else if (style == StyleType.quadrado) {
-                    // Garanta que os pontos estejam na ordem correta para desenhar o retângulo
-                    float left = Math.min(auxiliarLxInicial, auxiliarLxFinal);
-                    float right = Math.max(auxiliarLxInicial, auxiliarLxFinal);
-                    float top = Math.min(auxiliarLyInicial, auxiliarLyFinal);
-                    float bottom = Math.max(auxiliarLyInicial, auxiliarLyFinal);
-                    currentPath.reset();
-                    currentPath.addRect(left, top, right, bottom, Path.Direction.CW);
-                }else if (style == StyleType.desenhoLivre) {
-                    isPencilMode = true;
-                    currentPath.lineTo(lx, ly);
-                    paintList.add(currentPaint);
-                    pathList.add(currentPath);
-                }
-
-                paintList.add(currentPaint);
-                pathList.add(currentPath);
-                initialize();
+                isPencilMode = (style == StyleType.desenhoLivre);
+                startX = endX = x;
+                startY = endY = y;
+                currentPath.moveTo(x, y);
                 break;
 
             case MotionEvent.ACTION_MOVE:
-
+                endX = x;
+                endY = y;
                 if (isPencilMode) {
-                    currentPath.lineTo(lx, ly);
+                    currentPath.lineTo(x, y);
                 }
+                break;
 
-                auxiliarLxFinal = lx;
-                auxiliarLyFinal = ly;
+            case MotionEvent.ACTION_UP:
+                if (style == StyleType.linha) {
+                    currentPath.lineTo(x, y);
+                } else if (style == StyleType.circulo) {
+                    float radius = (float) Math.hypot(endX - startX, endY - startY) / 2;
+                    currentPath.reset();
+                    currentPath.addCircle((startX + endX) / 2, (startY + endY) / 2, radius, Path.Direction.CW);
+                } else if (style == StyleType.quadrado) {
+                    currentPath.reset();
+                    currentPath.addRect(Math.min(startX, endX), Math.min(startY, endY),
+                            Math.max(startX, endX), Math.max(startY, endY),
+                            Path.Direction.CW);
+                }
+                drawActions.add(new DrawAction(new Path(currentPath), new Paint(currentPaint)));
+                initialize();
                 break;
         }
-
         invalidate();
         return true;
     }
 
-    public void setColor(Color color) {
-        currentColor.setColor(color.toArgb());
-        currentPaint.setColor(color.toArgb());
+    public void setColor(int color) {
+        currentPaint.setColor(color);
     }
+
     public void backDraw() {
-        if (paintList.isEmpty()) {
-            return;
+        if (!drawActions.isEmpty()) {
+            drawActions.remove(drawActions.size() - 1);
+            invalidate();
         }
-
-        paintList.remove(paintList.size() - 1);
-        pathList.remove(pathList.size() - 1);
-
-        invalidate();
     }
 
     public void removeDraw() {
-        paintList.clear();
-        pathList.clear();
+        drawActions.clear();
         invalidate();
     }
 
     public void setStyleType(StyleType style) {
         this.style = style;
+    }
+
+    private static class DrawAction {
+        Path path;
+        Paint paint;
+
+        DrawAction(Path path, Paint paint) {
+            this.path = path;
+            this.paint = paint;
+        }
     }
 }
 
